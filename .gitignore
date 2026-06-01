@@ -1,0 +1,4 @@
+node_modules/
+workdo-state.json
+*.env
+.env
