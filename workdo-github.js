@@ -186,7 +186,8 @@ async function main() {
     });
     const context = await browser.newContext({
         geolocation: { latitude: 22.649368, longitude: 120.303737, accuracy: 50 },
-        permissions: ['geolocation']
+        permissions: ['geolocation'],
+        timezoneId: 'Asia/Taipei'
     });
     const page = await context.newPage();
 
@@ -281,7 +282,8 @@ async function main() {
             });
             const context2 = await browser2.newContext({
                 geolocation: { latitude: 22.649368, longitude: 120.303737, accuracy: 50 },
-                permissions: ['geolocation']
+                permissions: ['geolocation'],
+                timezoneId: 'Asia/Taipei'
             });
             const page2 = await context2.newPage();
             try {
