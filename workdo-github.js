@@ -15,13 +15,15 @@ const LVS_URL        = 'https://www.workdo.co/!#/aa7x48qm/aa7x48qm/C/lvs?cp=%2FL
 const LOGIN_URL      = 'https://www.workdo.co/Login?userLang=zh_TW';
 
 // ── 打卡時間設定 ─────────────────────────────────────────────────
-// 上班：workflow 在 08:00 CST 觸發，腳本內再隨機 delay 0~30 分鐘
-//       實際打卡時間落在 08:00 ~ 08:30
-const MORNING_RANDOM_RANGE = 30; // 分鐘
+// 上班：workflow 在 08:25 CST 觸發，腳本內再隨機 delay 1~5 分鐘
+//       實際打卡時間落在 08:26 ~ 08:30
+const MORNING_RANDOM_MIN   = 1;  // 最少等幾分鐘
+const MORNING_RANDOM_RANGE = 4;  // 再加 0~4 分鐘，共 1~5 分鐘
 
-// 下班：workflow 在 17:30 CST 觸發，腳本內再隨機 delay 0~40 分鐘
-//       實際打卡時間落在 17:30 ~ 18:10
-const EVENING_RANDOM_RANGE = 40; // 分鐘
+// 下班：workflow 在 17:25 CST 觸發，腳本內再隨機 delay 1~5 分鐘
+//       實際打卡時間落在 17:26 ~ 17:30
+const EVENING_RANDOM_MIN   = 1;  // 最少等幾分鐘
+const EVENING_RANDOM_RANGE = 4;  // 再加 0~4 分鐘，共 1~5 分鐘
 
 const email = process.env.WORKDO_EMAIL;
 const pwd   = process.env.WORKDO_PASSWORD;
@@ -207,25 +209,19 @@ async function main() {
         return;
     }
 
-    // 2. 隨機 delay（在瀏覽器啟動前先等，節省資源）
+    // 2. 隨機 delay 1~5 分鐘（在瀏覽器啟動前先等，節省資源）
     if (MODE === 'morning') {
-        const delayMin = Math.floor(Math.random() * (MORNING_RANDOM_RANGE + 1)); // 0~30 分鐘
-        if (delayMin > 0) {
-            const nowStr = new Date().toLocaleTimeString('zh-TW', { timeZone: 'Asia/Taipei' });
-            log(`上班隨機 delay：${delayMin} 分鐘（現在 ${nowStr}，打卡時間約 08:${String(delayMin).padStart(2,'0')}）`);
-            await sleep(delayMin * 60 * 1000);
-        }
+        const delayMin = MORNING_RANDOM_MIN + Math.floor(Math.random() * (MORNING_RANDOM_RANGE + 1)); // 1~5 分鐘
+        const nowStr = new Date().toLocaleTimeString('zh-TW', { timeZone: 'Asia/Taipei' });
+        log(`上班隨機 delay：${delayMin} 分鐘（現在 ${nowStr}）`);
+        await sleep(delayMin * 60 * 1000);
     }
 
     if (MODE === 'evening') {
-        const delayMin = Math.floor(Math.random() * (EVENING_RANDOM_RANGE + 1)); // 0~40 分鐘
-        if (delayMin > 0) {
-            const totalMin = 30 + delayMin; // 17:30 + delayMin
-            const h = 17 + Math.floor(totalMin / 60);
-            const m = totalMin % 60;
-            log(`下班隨機 delay：${delayMin} 分鐘（預計打卡時間 ${h}:${String(m).padStart(2,'0')}）`);
-            await sleep(delayMin * 60 * 1000);
-        }
+        const delayMin = EVENING_RANDOM_MIN + Math.floor(Math.random() * (EVENING_RANDOM_RANGE + 1)); // 1~5 分鐘
+        const nowStr = new Date().toLocaleTimeString('zh-TW', { timeZone: 'Asia/Taipei' });
+        log(`下班隨機 delay：${delayMin} 分鐘（現在 ${nowStr}）`);
+        await sleep(delayMin * 60 * 1000);
     }
 
     // 3. 啟動瀏覽器
