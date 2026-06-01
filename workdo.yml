@@ -2,12 +2,12 @@ name: WorkDo 自動打卡
 
 on:
   schedule:
-    # 上班：08:00 CST (UTC+8) = 00:00 UTC，週一到週五
-    # 腳本內部會再隨機 delay 0~30 分鐘，實際打卡時間落在 08:00~08:30
-    - cron: '0 0 * * 1-5'
-    # 下班：17:30 CST = 09:30 UTC，週一到週五
-    # 腳本內部會再隨機 delay 0~40 分鐘，實際打卡時間落在 17:30~18:10
-    - cron: '30 9 * * 1-5'
+    # 上班：08:25 CST (UTC+8) = 00:25 UTC，週一到週五
+    # 腳本內部再隨機 delay 1~5 分鐘，實際打卡時間落在 08:26~08:30
+    - cron: '25 0 * * 1-5'
+    # 下班：17:25 CST = 09:25 UTC，週一到週五
+    # 腳本內部再隨機 delay 1~5 分鐘，實際打卡時間落在 17:26~17:30
+    - cron: '25 9 * * 1-5'
   workflow_dispatch:
     inputs:
       mode:
@@ -22,7 +22,7 @@ on:
 jobs:
   punch:
     runs-on: ubuntu-latest
-    timeout-minutes: 90  # 最長等 40 分鐘 delay + 打卡流程，設 90 分鐘保險
+    timeout-minutes: 20  # delay 最長 5 分鐘 + 打卡流程，20 分鐘足夠
 
     steps:
       - name: Checkout
@@ -44,7 +44,7 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "MODE=${{ github.event.inputs.mode }}" >> $GITHUB_OUTPUT
-          elif [ "${{ github.event.schedule }}" = "0 0 * * 1-5" ]; then
+          elif [ "${{ github.event.schedule }}" = "25 0 * * 1-5" ]; then
             echo "MODE=morning" >> $GITHUB_OUTPUT
           else
             echo "MODE=evening" >> $GITHUB_OUTPUT
