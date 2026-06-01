@@ -1,0 +1,57 @@
+name: WorkDo 自動打卡
+
+on:
+  schedule:
+    # 上班：08:00 CST (UTC+8) = 00:00 UTC，週一到週五
+    # 腳本內部會再隨機 delay 0~30 分鐘，實際打卡時間落在 08:00~08:30
+    - cron: '0 0 * * 1-5'
+    # 下班：17:30 CST = 09:30 UTC，週一到週五
+    # 腳本內部會再隨機 delay 0~40 分鐘，實際打卡時間落在 17:30~18:10
+    - cron: '30 9 * * 1-5'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'morning 或 evening'
+        required: true
+        default: 'morning'
+        type: choice
+        options:
+          - morning
+          - evening
+
+jobs:
+  punch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90  # 最長等 40 分鐘 delay + 打卡流程，設 90 分鐘保險
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright Chromium
+        run: npx playwright install chromium --with-deps
+
+      - name: Determine mode
+        id: mode
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "MODE=${{ github.event.inputs.mode }}" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event.schedule }}" = "0 0 * * 1-5" ]; then
+            echo "MODE=morning" >> $GITHUB_OUTPUT
+          else
+            echo "MODE=evening" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Run WorkDo
+        env:
+          WORKDO_EMAIL: ${{ secrets.WORKDO_EMAIL }}
+          WORKDO_PASSWORD: ${{ secrets.WORKDO_PASSWORD }}
+        run: node workdo-github.js ${{ steps.mode.outputs.MODE }}

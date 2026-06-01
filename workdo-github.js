@@ -13,7 +13,15 @@ if (!['morning', 'evening'].includes(MODE)) {
 const ATTENDANCE_URL = 'https://www.workdo.co/!#/aa7x48qm/aa7x48qm/C/ccn?cp=%2FCCN002W%2FCreate002W4';
 const LVS_URL        = 'https://www.workdo.co/!#/aa7x48qm/aa7x48qm/C/lvs?cp=%2FLVS001W%2FQuery001W1';
 const LOGIN_URL      = 'https://www.workdo.co/Login?userLang=zh_TW';
-const WORK_HOURS     = 9;
+
+// ── 打卡時間設定 ─────────────────────────────────────────────────
+// 上班：workflow 在 08:00 CST 觸發，腳本內再隨機 delay 0~30 分鐘
+//       實際打卡時間落在 08:00 ~ 08:30
+const MORNING_RANDOM_RANGE = 30; // 分鐘
+
+// 下班：workflow 在 17:30 CST 觸發，腳本內再隨機 delay 0~40 分鐘
+//       實際打卡時間落在 17:30 ~ 18:10
+const EVENING_RANDOM_RANGE = 40; // 分鐘
 
 const email = process.env.WORKDO_EMAIL;
 const pwd   = process.env.WORKDO_PASSWORD;
@@ -161,6 +169,27 @@ async function waitForFrame(page, urlSubstr, timeout = 20000) {
     throw new Error(`等待 iframe(${urlSubstr}) 逾時`);
 }
 
+// ── 執行打卡（上班 & 下班共用）──────────────────────────────────
+async function doPunch(page, label) {
+    log(`前往出勤頁，準備打${label}卡...`);
+    await page.goto(ATTENDANCE_URL, { waitUntil: 'domcontentloaded' });
+    await sleep(4000);
+
+    const ccnFrame = await waitForFrame(page, 'ccnaweb', 20000);
+    try { await ccnFrame.waitForSelector('img[src*="ic-clockin"]', { timeout: 10000 }); }
+    catch { log('⚠️ 等待打卡區塊逾時，嘗試繼續'); }
+
+    const btn = await ccnFrame.$('button[name="btnSaveFromCreate002W4"]');
+    if (btn) {
+        await ccnFrame.evaluate(b => b.removeAttribute('disabled'), btn);
+        await btn.click();
+        log(`✅ 已自動點擊${label}打卡按鈕`);
+        await sleep(2000);
+    } else {
+        log(`❌ 找不到${label}打卡按鈕`);
+    }
+}
+
 // ── 主流程 ───────────────────────────────────────────────────────
 async function main() {
     if (!email || !pwd) {
@@ -171,15 +200,35 @@ async function main() {
     const today = todayStr();
     log(`===== WorkDo ${MODE} 開始 (${today}) =====`);
 
-    // 台灣假日檢查
+    // 1. 台灣假日檢查
     const holiday = await checkTaiwanHoliday(today);
     if (holiday.isHoliday) {
         log(`✅ 今天是台灣假日（${holiday.description}），結束`);
         return;
     }
 
-    // 啟動瀏覽器（GitHub Actions 用內建 Chromium）
-    let browserClosed = false;
+    // 2. 隨機 delay（在瀏覽器啟動前先等，節省資源）
+    if (MODE === 'morning') {
+        const delayMin = Math.floor(Math.random() * (MORNING_RANDOM_RANGE + 1)); // 0~30 分鐘
+        if (delayMin > 0) {
+            const nowStr = new Date().toLocaleTimeString('zh-TW', { timeZone: 'Asia/Taipei' });
+            log(`上班隨機 delay：${delayMin} 分鐘（現在 ${nowStr}，打卡時間約 08:${String(delayMin).padStart(2,'0')}）`);
+            await sleep(delayMin * 60 * 1000);
+        }
+    }
+
+    if (MODE === 'evening') {
+        const delayMin = Math.floor(Math.random() * (EVENING_RANDOM_RANGE + 1)); // 0~40 分鐘
+        if (delayMin > 0) {
+            const totalMin = 30 + delayMin; // 17:30 + delayMin
+            const h = 17 + Math.floor(totalMin / 60);
+            const m = totalMin % 60;
+            log(`下班隨機 delay：${delayMin} 分鐘（預計打卡時間 ${h}:${String(m).padStart(2,'0')}）`);
+            await sleep(delayMin * 60 * 1000);
+        }
+    }
+
+    // 3. 啟動瀏覽器
     const browser = await chromium.launch({
         headless: true,
         args: ['--no-sandbox', '--disable-setuid-sandbox']
@@ -192,13 +241,13 @@ async function main() {
     const page = await context.newPage();
 
     try {
-        // 登入
+        // 4. 登入
         await page.goto(LOGIN_URL, { waitUntil: 'domcontentloaded' });
         await doLogin(page);
         await page.waitForURL(url => !url.toString().includes('/Login'), { timeout: 20000 });
         log('登入成功');
 
-        // LVS 請假檢查
+        // 5. LVS 請假檢查
         log('前往 LVS 請假頁...');
         await page.goto(LVS_URL, { waitUntil: 'domcontentloaded' });
         await sleep(2000);
@@ -219,8 +268,8 @@ async function main() {
             return;
         }
 
-        // 出勤頁
-        log('前往出勤頁...');
+        // 6. 讀取出勤狀態
+        log('前往出勤頁，讀取打卡狀態...');
         await page.goto(ATTENDANCE_URL, { waitUntil: 'domcontentloaded' });
         await sleep(4000);
 
@@ -235,89 +284,35 @@ async function main() {
             return;
         }
 
-        // ── 早上時段 ──────────────────────────────────────────────
+        // ── 上班打卡 ──────────────────────────────────────────────
         if (MODE === 'morning') {
             if (info.clockInTime) {
                 log(`✅ 已打上班卡 ${info.clockInTime}，結束`);
                 return;
             }
-            // TODO：同事版早上動作請在此修改
-            log('⚠️ 尚未打上班卡');
+            // 直接打上班卡（時間已在步驟 2 隨機等待過）
+            await doPunch(page, '上班');
             return;
         }
 
-        // ── 下午時段 ──────────────────────────────────────────────
-        if (info.noClockIn) {
-            log('⚠️ 今天尚未打上班卡，無法自動打下班卡');
-            return;
-        }
-
-        if (info.clockInTime) {
-            if (info.clockOutTime) {
-                log(`✅ 今天已完成打卡：${info.clockInTime} → ${info.clockOutTime}`);
+        // ── 下班打卡 ──────────────────────────────────────────────
+        if (MODE === 'evening') {
+            if (info.noClockIn) {
+                log('⚠️ 今天尚未打上班卡，無法自動打下班卡');
                 return;
             }
-
-            const [h, m]      = info.clockInTime.split(':').map(Number);
-            const clockOutReq = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Taipei' }));
-            clockOutReq.setHours(h + WORK_HOURS, m, 0, 0);
-            const now         = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Taipei' }));
-            const diffMs      = clockOutReq.getTime() - now.getTime();
-            const clockOutStr = `${String(clockOutReq.getHours()).padStart(2,'0')}:${String(clockOutReq.getMinutes()).padStart(2,'0')}`;
-            const delayMin    = Math.floor(Math.random() * 6) + 5; // 5~10 分鐘
-
-            const waitMs = (diffMs > 0 ? diffMs : 0) + delayMin * 60 * 1000;
-            log(`上班時間 ${info.clockInTime}，預計下班 ${clockOutStr}，等待 ${Math.ceil(waitMs/60000)} 分鐘後自動打卡...`);
-
-            await browser.close();
-            browserClosed = true;
-
-            if (waitMs > 0) await sleep(waitMs);
-
-            // 重新開瀏覽器打下班卡
-            log('重新開啟瀏覽器，準備打下班卡...');
-            const browser2 = await chromium.launch({
-                headless: true,
-                args: ['--no-sandbox', '--disable-setuid-sandbox']
-            });
-            const context2 = await browser2.newContext({
-                geolocation: { latitude: 22.649368, longitude: 120.303737, accuracy: 50 },
-                permissions: ['geolocation'],
-                timezoneId: 'Asia/Taipei'
-            });
-            const page2 = await context2.newPage();
-            try {
-                await page2.goto(LOGIN_URL, { waitUntil: 'domcontentloaded' });
-                await doLogin(page2);
-                await page2.waitForURL(url => !url.toString().includes('/Login'), { timeout: 20000 });
-                log('重新登入成功');
-
-                await page2.goto(ATTENDANCE_URL, { waitUntil: 'domcontentloaded' });
-                await sleep(4000);
-                const ccnFrame2 = await waitForFrame(page2, 'ccnaweb', 20000);
-                try { await ccnFrame2.waitForSelector('img[src*="ic-clockin"]', { timeout: 10000 }); }
-                catch { log('⚠️ 等待打卡區塊逾時，嘗試繼續'); }
-
-                const btn = await ccnFrame2.$('button[name="btnSaveFromCreate002W4"]');
-                if (btn) {
-                    await ccnFrame2.evaluate(b => b.removeAttribute('disabled'), btn);
-                    await btn.click();
-                    log('✅ 已自動點擊下班打卡按鈕');
-                    await sleep(2000);
-                } else {
-                    log('❌ 找不到打卡按鈕');
-                }
-            } finally {
-                await browser2.close();
-                log('瀏覽器已關閉');
+            if (info.clockOutTime) {
+                log(`✅ 今天已打下班卡 ${info.clockOutTime}，結束`);
+                return;
             }
+            // 直接打下班卡（時間已在步驟 2 隨機等待過）
+            await doPunch(page, '下班');
+            return;
         }
 
     } finally {
-        if (!browserClosed) {
-            await browser.close();
-            log('瀏覽器已關閉');
-        }
+        await browser.close();
+        log('瀏覽器已關閉');
     }
 }
 
