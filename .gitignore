@@ -2,3 +2,6 @@ node_modules/
 workdo-state.json
 *.env
 .env
+workdo.js
+workdo-test.js
+workdo-autologin.user.js
