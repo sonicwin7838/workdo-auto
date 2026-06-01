@@ -55,3 +55,11 @@ jobs:
           WORKDO_EMAIL: ${{ secrets.WORKDO_EMAIL }}
           WORKDO_PASSWORD: ${{ secrets.WORKDO_PASSWORD }}
         run: node workdo-github.js ${{ steps.mode.outputs.MODE }}
+
+      - name: Upload debug screenshot
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: login-debug
+          path: login-debug.png
+          if-no-files-found: ignore
