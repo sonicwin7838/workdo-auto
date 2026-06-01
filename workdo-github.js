@@ -240,8 +240,18 @@ async function main() {
         // 4. 登入
         await page.goto(LOGIN_URL, { waitUntil: 'domcontentloaded' });
         await doLogin(page);
-        await page.waitForURL(url => !url.toString().includes('/Login'), { timeout: 20000 });
-        log('登入成功');
+        try {
+            await page.waitForURL(url => !url.toString().includes('/Login'), { timeout: 20000 });
+            log('登入成功');
+        } catch (e) {
+            // 登入失敗：截圖 + 印出當前 URL 和頁面文字，方便診斷
+            log(`⚠️ 登入等待逾時，當前 URL：${page.url()}`);
+            const bodyText = await page.evaluate(() => document.body?.innerText?.slice(0, 500) || '');
+            log(`⚠️ 頁面內容（前500字）：${bodyText}`);
+            await page.screenshot({ path: 'login-debug.png', fullPage: false });
+            log('截圖已存為 login-debug.png（請至 Actions Artifacts 下載）');
+            throw e;
+        }
 
         // 5. LVS 請假檢查
         log('前往 LVS 請假頁...');
