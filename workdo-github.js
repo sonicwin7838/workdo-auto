@@ -15,15 +15,19 @@ const LVS_URL        = 'https://www.workdo.co/!#/aa7x48qm/aa7x48qm/C/lvs?cp=%2FL
 const LOGIN_URL      = 'https://www.workdo.co/Login?userLang=zh_TW';
 
 // ── 打卡時間設定 ─────────────────────────────────────────────────
-// 上班：workflow 在 08:25 CST 觸發，腳本內再隨機 delay 1~5 分鐘
-//       實際打卡時間落在 08:26 ~ 08:30
-const MORNING_RANDOM_MIN   = 1;  // 最少等幾分鐘
-const MORNING_RANDOM_RANGE = 4;  // 再加 0~4 分鐘，共 1~5 分鐘
+const MORNING_RANDOM_MIN   = 1;
+const MORNING_RANDOM_RANGE = 4;
 
-// 下班：workflow 在 17:25 CST 觸發，腳本內再隨機 delay 1~5 分鐘
-//       實際打卡時間落在 17:26 ~ 17:30
-const EVENING_RANDOM_MIN   = 1;  // 最少等幾分鐘
-const EVENING_RANDOM_RANGE = 4;  // 再加 0~4 分鐘，共 1~5 分鐘
+const EVENING_RANDOM_MIN   = 1;
+const EVENING_RANDOM_RANGE = 4;
+
+// ── 時間容許範圍（分鐘）─────────────────────────────────────────
+// 超過此範圍代表 GitHub Actions 延遲太久，直接跳出避免異常打卡時間
+// morning 預期 08:50 CST，最多容許到 09:30 CST（+40 分鐘）
+// evening 預期 17:30 CST，最多容許到 18:10 CST（+40 分鐘）
+const MORNING_EXPECTED_CST = { h: 8,  m: 50 };
+const EVENING_EXPECTED_CST = { h: 17, m: 30 };
+const TOLERANCE_MINUTES    = 40;
 
 const email = process.env.WORKDO_EMAIL;
 const pwd   = process.env.WORKDO_PASSWORD;
@@ -36,7 +40,35 @@ function log(msg) {
 }
 
 function todayStr() {
-    return new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Taipei' }); // YYYY-MM-DD
+    return new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Taipei' });
+}
+
+// ── 檢查現在是否在容許的打卡時間範圍內 ──────────────────────────
+function checkTimeWindow(mode) {
+    const now = new Date();
+    // 取得台灣時間的時與分
+    const cstStr = now.toLocaleString('zh-TW', { timeZone: 'Asia/Taipei', hour: '2-digit', minute: '2-digit', hour12: false });
+    // cstStr 格式例如 "08:50" 或 "17:30"
+    const [cstH, cstM] = cstStr.split(':').map(Number);
+    const nowMinutes = cstH * 60 + cstM;
+
+    const expected = mode === 'morning' ? MORNING_EXPECTED_CST : EVENING_EXPECTED_CST;
+    const expectedMinutes = expected.h * 60 + expected.m;
+    const diff = nowMinutes - expectedMinutes;
+
+    const nowDisplay = `${String(cstH).padStart(2,'0')}:${String(cstM).padStart(2,'0')}`;
+    const expDisplay = `${String(expected.h).padStart(2,'0')}:${String(expected.m).padStart(2,'0')}`;
+    log(`時間檢查：現在 CST ${nowDisplay}，預期 ${expDisplay}，差距 ${diff} 分鐘`);
+
+    if (diff < 0) {
+        log(`觸發時間比預期早 ${Math.abs(diff)} 分鐘，繼續執行`);
+        return true;
+    }
+    if (diff > TOLERANCE_MINUTES) {
+        log(`❌ 已超過容許範圍 ${TOLERANCE_MINUTES} 分鐘（實際延遲 ${diff} 分鐘），跳過本次打卡`);
+        return false;
+    }
+    return true;
 }
 
 // ── 台灣假日 API ─────────────────────────────────────────────────
@@ -209,22 +241,27 @@ async function main() {
         return;
     }
 
-    // 2. 隨機 delay 1~5 分鐘（在瀏覽器啟動前先等，節省資源）
+    // 2. 時間範圍檢查（GitHub Actions schedule 延遲保護）
+    if (!checkTimeWindow(MODE)) {
+        process.exit(0);
+    }
+
+    // 3. 隨機 delay 1~5 分鐘（在瀏覽器啟動前先等，節省資源）
     if (MODE === 'morning') {
-        const delayMin = MORNING_RANDOM_MIN + Math.floor(Math.random() * (MORNING_RANDOM_RANGE + 1)); // 1~5 分鐘
+        const delayMin = MORNING_RANDOM_MIN + Math.floor(Math.random() * (MORNING_RANDOM_RANGE + 1));
         const nowStr = new Date().toLocaleTimeString('zh-TW', { timeZone: 'Asia/Taipei' });
         log(`上班隨機 delay：${delayMin} 分鐘（現在 ${nowStr}）`);
         await sleep(delayMin * 60 * 1000);
     }
 
     if (MODE === 'evening') {
-        const delayMin = EVENING_RANDOM_MIN + Math.floor(Math.random() * (EVENING_RANDOM_RANGE + 1)); // 1~5 分鐘
+        const delayMin = EVENING_RANDOM_MIN + Math.floor(Math.random() * (EVENING_RANDOM_RANGE + 1));
         const nowStr = new Date().toLocaleTimeString('zh-TW', { timeZone: 'Asia/Taipei' });
         log(`下班隨機 delay：${delayMin} 分鐘（現在 ${nowStr}）`);
         await sleep(delayMin * 60 * 1000);
     }
 
-    // 3. 啟動瀏覽器
+    // 4. 啟動瀏覽器
     const browser = await chromium.launch({
         headless: true,
         args: ['--no-sandbox', '--disable-setuid-sandbox']
@@ -237,14 +274,13 @@ async function main() {
     const page = await context.newPage();
 
     try {
-        // 4. 登入
+        // 5. 登入
         await page.goto(LOGIN_URL, { waitUntil: 'domcontentloaded' });
         await doLogin(page);
         try {
             await page.waitForURL(url => !url.toString().includes('/Login'), { timeout: 20000 });
             log('登入成功');
         } catch (e) {
-            // 登入失敗：截圖 + 印出當前 URL 和頁面文字，方便診斷
             log(`⚠️ 登入等待逾時，當前 URL：${page.url()}`);
             const bodyText = await page.evaluate(() => document.body?.innerText?.slice(0, 500) || '');
             log(`⚠️ 頁面內容（前500字）：${bodyText}`);
@@ -253,7 +289,7 @@ async function main() {
             throw e;
         }
 
-        // 5. LVS 請假檢查
+        // 6. LVS 請假檢查
         log('前往 LVS 請假頁...');
         await page.goto(LVS_URL, { waitUntil: 'domcontentloaded' });
         await sleep(2000);
@@ -274,7 +310,7 @@ async function main() {
             return;
         }
 
-        // 6. 讀取出勤狀態
+        // 7. 讀取出勤狀態
         log('前往出勤頁，讀取打卡狀態...');
         await page.goto(ATTENDANCE_URL, { waitUntil: 'domcontentloaded' });
         await sleep(4000);
@@ -296,7 +332,6 @@ async function main() {
                 log(`✅ 已打上班卡 ${info.clockInTime}，結束`);
                 return;
             }
-            // 直接打上班卡（時間已在步驟 2 隨機等待過）
             await doPunch(page, '上班');
             return;
         }
@@ -311,7 +346,6 @@ async function main() {
                 log(`✅ 今天已打下班卡 ${info.clockOutTime}，結束`);
                 return;
             }
-            // 直接打下班卡（時間已在步驟 2 隨機等待過）
             await doPunch(page, '下班');
             return;
         }
