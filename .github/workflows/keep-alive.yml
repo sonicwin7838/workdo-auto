@@ -1,0 +1,22 @@
+name: Keep Alive
+
+on:
+  schedule:
+    # 每週日 08:00 CST (UTC 00:00) 自動 commit 保持 repo 活躍
+    - cron: '0 0 * * 0'
+
+jobs:
+  keep-alive:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Keep repo active
+        run: |
+          git config user.email "actions@github.com"
+          git config user.name "GitHub Actions"
+          echo "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > .keep-alive
+          git add .keep-alive
+          git commit -m "chore: keep alive $(date -u +%Y-%m-%d)"
+          git push
